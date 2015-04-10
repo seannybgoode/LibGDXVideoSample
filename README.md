@@ -19,7 +19,7 @@ We've taken this work and done some optimization and added audio support.
 -added the 'Video Screen' class for easy video playback
 -added a callback for the video frame texture to update when we have a new video frame
 this was necessary to prevent choppy playback
-
+-added the xuggler and slf4j libraries and their licenses
 ![Screenshot](screenshot.png "Screenshot")
 
 
