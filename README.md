@@ -12,6 +12,12 @@ This project was forked from https://github.com/aaronsnoswell/LibGDXVideoSample
 A tip of the cap to Aaron Snoswell for doing the basic work necessary to make this project possible.
 We've taken this work and done some optimization and added audio support.
 
+#0.1.1 changes
+
+-fixed an issue with video corruption during playback
+
+-improved the issues with audio sync and added improved desync protection
+
 #0.1.0 changes
 
 - added support for audio track playback

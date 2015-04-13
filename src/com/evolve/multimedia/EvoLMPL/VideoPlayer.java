@@ -200,21 +200,6 @@ public class VideoPlayer {
 				throw new RuntimeException("Could not open video decoder for container: " + videoPath);
 			}
 			
-			if (videoCoder.getPixelType() != IPixelFormat.Type.BGR24) {
-				// If this stream is not in BGR24, we're going to need to convert it
-				resampler = IVideoResampler.make(
-					videoCoder.getWidth(),
-					videoCoder.getHeight(),
-					IPixelFormat.Type.BGR24,
-					videoCoder.getWidth(),
-					videoCoder.getHeight(),
-					videoCoder.getPixelType()
-				);
-				
-				if (resampler == null) {
-					throw new RuntimeException("Could not create color space resampler");
-				}
-			}
 			this.picture = IVideoPicture.make(
 					videoCoder.getPixelType(),
 					videoCoder.getWidth(),
@@ -226,7 +211,7 @@ public class VideoPlayer {
 			 */
 			firstTimestampMilliseconds = container.getStartTime() / 1000;
 		}
-		
+		samples.setTimeStamp(picture.getTimeStamp());
 		playState = PlayState.PLAYING;
 	}
 	
@@ -293,7 +278,7 @@ public class VideoPlayer {
 	public void update(float dtSeconds) {
 		if(playState != PlayState.PLAYING) return;
 		
-		long syncTolerance = 75;
+		long syncTolerance = 90;
 		
 		long dtMilliseconds = (long)(dtSeconds * 1000);
 		playTimeMilliseconds += dtMilliseconds;
@@ -314,7 +299,9 @@ public class VideoPlayer {
 			{
 				System.out.println("Audio: " + samples.getTimeStamp() + " " + " Video: " + picture.getTimeStamp() + " Difference(ms): " 
 																		+ (samples.getTimeStamp()/1000 - picture.getTimeStamp()/1000));
-				container.seekKeyFrame(videoStreamId, samples.getTimeStamp(), IContainer.SEEK_FLAG_ANY);
+				container.seekKeyFrame(videoStreamId, samples.getTimeStamp() - syncTolerance * 1000, samples.getTimeStamp(), 
+													samples.getTimeStamp() + 1000*syncTolerance, IContainer.SEEK_FLAG_ANY);
+				samples.setTimeStamp(picture.getTimeStamp());
 			}
 			if(packet.getStreamIndex() == videoStreamId) 
 			{
