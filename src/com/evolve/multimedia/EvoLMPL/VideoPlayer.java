@@ -8,6 +8,9 @@ import java.nio.ShortBuffer;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import javax.imageio.ImageIO;
 import javax.sound.sampled.AudioFormat;
@@ -23,7 +26,9 @@ import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Sprite;
+import com.evolve.dataStruct.Queue;
 import com.evolve.pixeldefender.GameManager;
+import com.xuggle.ferry.IBuffer;
 import com.xuggle.xuggler.Global;
 import com.xuggle.xuggler.IAudioSamples;
 import com.xuggle.xuggler.ICodec;
@@ -71,12 +76,20 @@ public class VideoPlayer {
 	
 	private PlayState playState = PlayState.STOPPED;
 	private long playTimeMilliseconds = 0;
+	public long getPlayTimeMilliseconds() {
+		return playTimeMilliseconds;
+	}
+	
+	private long avSyncValue = 0;
+
 	private IContainer container;
 	
 	private long firstTimestampMilliseconds = Global.NO_PTS;
 	
 	// The tollerance used when waiting for the playhead to catch up
-	private long sleepTolleranceMilliseconds = 50;
+	private static final long SYNC_TOLERANCE_MICROSECONDS = 75000;
+	//used to tell if audio is finished (if there are no threads writing out audio data)
+	public int writeOutThreadCount;
 	
 	private static SourceDataLine mLine;
 	
@@ -93,11 +106,18 @@ public class VideoPlayer {
 	long sleepTimeoutMilliseconds = 0;
 	
 	ExecutorService writeOutPool;
-	private IAudioSamples samples;
+
 	private IConverter converter;
 	private IVideoPicture picture;
 	
 	VideoScreen screen;
+	private long videoTimeStamp;
+	private long audioTimeStamp;
+	
+	Thread packetHandlerThread;
+	private PacketHandler packetHandlerRunnable;
+	public boolean videoComplete = false;
+	
 	
 	/**
 	 * ctor
@@ -192,7 +212,6 @@ public class VideoPlayer {
 				//now prep the audio stream
 				openJavaSound(audioCoder);
 			}
-			this.samples = IAudioSamples.make(4096, audioCoder.getChannels());
 			/* Now we have found the video stream in this file. Let's open up our
 			 * decoder so it can do work
 			 */
@@ -211,8 +230,12 @@ public class VideoPlayer {
 			 */
 			firstTimestampMilliseconds = container.getStartTime() / 1000;
 		}
-		samples.setTimeStamp(picture.getTimeStamp());
+		//samples.setTimeStamp(picture.getTimeStamp());
+		this.packetHandlerRunnable = new PacketHandler(container);
+		this.packetHandlerThread = new Thread(packetHandlerRunnable);
+		this.packetHandlerThread.start();
 		playState = PlayState.PLAYING;
+		System.out.println("Video Player Playing");
 	}
 	
 	/**
@@ -221,6 +244,7 @@ public class VideoPlayer {
 	 */
 	public void pause() {
 		playState = PlayState.PAUSED;
+		System.out.println("Video Player Paused");
 	}
 	
 	/**
@@ -246,6 +270,7 @@ public class VideoPlayer {
 		setDefaultTexture();
 		
 		playState = PlayState.STOPPED;
+		System.out.println("Video Player Stopped");
 	}
 	
 	private void setDefaultTexture()
@@ -277,100 +302,72 @@ public class VideoPlayer {
 	 */
 	public void update(float dtSeconds) {
 		if(playState != PlayState.PLAYING) return;
+	
+		this.playTimeMilliseconds += dtSeconds*1000;
+		AudioFrame newAudioFrame = this.packetHandlerRunnable.getAudioFrame(); 
+		IVideoPicture newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
+		this.picture = newVideoFrame;
 		
-		long syncTolerance = 90;
-		
-		long dtMilliseconds = (long)(dtSeconds * 1000);
-		playTimeMilliseconds += dtMilliseconds;
-		
-		sleepTimeoutMilliseconds = (long) Math.max(0, sleepTimeoutMilliseconds - dtMilliseconds);
-		if(sleepTimeoutMilliseconds > 0) {
-			// The playhead is still ahead of the current frame - do nothing
-			return;
+		if(this.packetHandlerRunnable.getNumAudioPackets() <= 0 
+				&& this.packetHandlerRunnable.getNumVideoPackets() <= 0 
+				&& this.packetHandlerRunnable.isDecoderComplete())
+		{
+			synchronized(packetHandlerRunnable)
+			{
+				this.packetHandlerRunnable.notify();
+			}
+		}
+
+		//write out all the damn audio that you can, 
+		//packet decoder is decoding audio even as this code runs, if you don't it sounds like crap
+		while(newAudioFrame!= null)
+		{
+
+			this.writeOutPool.execute(new WriteOutSoundBytes(newAudioFrame.byteArray, newAudioFrame.timeStamp));
+			newAudioFrame = this.packetHandlerRunnable.getAudioFrame();
+		}
+		//if the video is behind the audio, read ahead some frames 
+		while(newVideoFrame != null && (newVideoFrame.getTimeStamp() <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS || writeOutThreadCount == 0))
+		{
+			//this.videoUpdated = true;
+			videoTimeStamp = newVideoFrame.getTimeStamp();
+			newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
+			this.picture = newVideoFrame;
 		}
 		
-		
-
-		while(container.readNextPacket(packet) >= 0) {
+		if(newVideoFrame != null) 
+		{
+			// Attempt to read the entire packet
+			int offset = 0;
+			IVideoPicture newPic = picture.copyReference();
 			
-			/*If the difference between the audio and the video is above the threshold for human perception (about 75ms), seek
-			 * the video ahead. TODO experiment with seeking the audio backwards. Or seeking both to a middle point.*/
-			if(samples.getTimeStamp()/1000 - picture.getTimeStamp()/1000 > syncTolerance)
-			{
-				System.out.println("Audio: " + samples.getTimeStamp() + " " + " Video: " + picture.getTimeStamp() + " Difference(ms): " 
-																		+ (samples.getTimeStamp()/1000 - picture.getTimeStamp()/1000));
-				container.seekKeyFrame(videoStreamId, samples.getTimeStamp() - syncTolerance * 1000, samples.getTimeStamp(), 
-													samples.getTimeStamp() + 1000*syncTolerance, IContainer.SEEK_FLAG_ANY);
-				samples.setTimeStamp(picture.getTimeStamp());
-			}
-			if(packet.getStreamIndex() == videoStreamId) 
-			{
-				// Attempt to read the entire packet
-				int offset = 0;
-				while(offset < packet.getSize()) {
-					// Decode the video, checking for any errors
-					int bytesDecoded = videoCoder.decodeVideo(picture, packet, offset);
-					
-					if (bytesDecoded < 0) {
-						throw new RuntimeException("Got error decoding video");
-					}
-					offset += bytesDecoded;
 
-					/* Some decoders will consume data in a packet, but will not
-					 * be able to construct a full video picture yet. Therefore
-					 * you should always check if you got a complete picture
-					 * from the decoder
-					 */
-					if (picture.isComplete()) {
-						// We've read the entire packet
-						IVideoPicture newPic = picture;
-						
-						// Timestamps are stored in microseconds - convert to milli
-						long absoluteFrameTimestampMilliseconds = picture.getTimeStamp() / 1000;
-						long relativeFrameTimestampMilliseconds = (absoluteFrameTimestampMilliseconds - firstTimestampMilliseconds);
-						long frameTimeDelta = relativeFrameTimestampMilliseconds - playTimeMilliseconds;
-						if(frameTimeDelta > 0) {
-							// The video is ahead of the playhead, don't read any more frames until it catches up
-							sleepTimeoutMilliseconds = frameTimeDelta + sleepTolleranceMilliseconds;
-							return;
-						}
-
-						//converts the image to the desired format, added some optimization here, since the
-						//old code was using an old inefficient method for doing this
-						if(this.converter == null)
-							this.converter = ConverterFactory.createConverter(ConverterFactory.XUGGLER_BGR_24, newPic);
-						BufferedImage javaImage = converter.toImage(newPic);
-						
-						// Update the current texture (now done via callback)
-						updateTexture(javaImage);
-						
-						continue;
-					}
-				}
-			}
-			else if(packet.getStreamIndex() == this.audioStreamId)
-			{
-				int offset = 0;
-				while(offset < packet.getSize())
-		        {
-					 int bytesDecoded = audioCoder.decodeAudio(samples, packet, offset);
-					 if (bytesDecoded < 0)
-						 throw new RuntimeException("got error decoding audio in: " + this.videoPath);
-			          offset += bytesDecoded;
-		        }
-				if(samples.isComplete())
-				{
-					//once we have a complete sample we send the byte array to a thread that handles writing to the sound buffer
-		        	this.writeOutPool.execute(new WriteOutSoundBytes(samples.getData().getByteArray(0, samples.getSize())));
-				}
-				
-			}
+			//converts the image to the desired format, added some optimization here, since the
+			//old code was using an old inefficient method for doing this
+			if(this.converter == null)
+				this.converter = ConverterFactory.createConverter(ConverterFactory.XUGGLER_BGR_24, newPic);
+			BufferedImage javaImage = converter.toImage(newPic);
 			
+			// Update the current texture (now done via callback)
+			updateTexture(javaImage);	
 		}
-		stop();
-		return;
+		if(videoComplete)
+			stop();
+
 	}
 	
+	public long getAudioTimeStamp() {
+		return audioTimeStamp;
+	}
+
+	public long getAvSyncValue() {
+		return avSyncValue;
+	}
+
+	public long getVideoTimeStamp() {
+		return videoTimeStamp;
+	}
+
 	/**
 	 * Updates the internal texture with new video data
 	 * @param img The new video frame data
@@ -472,18 +469,223 @@ public class VideoPlayer {
 	
 	private class WriteOutSoundBytes implements Runnable
 	{
-		byte[] rawByte;
-		public WriteOutSoundBytes(byte[] rawBytes)
+		private byte[] rawByte;
+		private long timeStamp;
+		
+		
+		public WriteOutSoundBytes(byte[] rawBytes, long timeStamp)
 		{
 			rawByte = rawBytes;
+			this.timeStamp = timeStamp;
+			writeOutThreadCount ++;
 		}
 		@Override
 		public void run() 
 		{
 			mLine.write(rawByte, 0, rawByte.length);
+			audioTimeStamp = timeStamp;
+			writeOutThreadCount --;
+		}
+	}
+	
+	private class PacketHandler implements Runnable
+	{
+		IPacket packet;
+		IContainer container;
+		IAudioSamples sample;
+		IVideoPicture picture;
+		
+		private final long PREBUFFER = 500;
+		Queue<IVideoPicture> pictures;
+		Queue<AudioFrame> samples;
+		Lock readLock;
+
+		private IStreamCoder aCoder;
+		private IStreamCoder vCoder;
+		private boolean decoderComplete;
+		
+		
+		public PacketHandler(IContainer container)
+		{
+			
+			this.packet = IPacket.make();
+			this.container = container.copyReference();
+			this.sample = IAudioSamples.make(1024, audioCoder.getChannels());
+			this.picture = IVideoPicture.make(
+					videoCoder.getPixelType(),
+					videoCoder.getWidth(),
+					videoCoder.getHeight()
+				);
+			this.aCoder = audioCoder.copyReference();
+			this.vCoder = videoCoder.copyReference();
+			this.readLock = new ReentrantLock();
+			this.samples = new Queue<AudioFrame>();
+			this.pictures = new Queue<IVideoPicture>();
+		}
+		
+		@Override
+		public void run() 
+		{
+				
+				while(this.container.readNextPacket(packet) >= 0) {
+					/*if(samples.getCount() >= 2)
+					{
+						while(samples.getCount() >= 2 && samples.peekLast().timeStamp - samples.peekNext().timeStamp > PREBUFFER * 1000)
+						{
+							try {
+								Thread.sleep(PREBUFFER/2);
+							} catch (InterruptedException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+							}
+						}
+						
+					}*/
+					
+					//LEAVING THIS BIT IN IN-CASE WE WANT TO USE IT LATER
+					/*If the difference between the audio and the video is above the threshold for human perception (about 75ms), seek
+					 * the video ahead. TODO experiment with seeking the audio backwards. Or seeking both to a middle point.*/
+					/*avSyncValue = (this.sample.getTimeStamp()/1000 - this.picture.getTimeStamp()/1000);
+					videoTimeStamp = this.picture.getTimeStamp();
+					audioTimeStamp = this.sample.getTimeStamp();
+					if(sample.getTimeStamp()/1000 - picture.getTimeStamp()/1000 > SYNC_TOLERANCE)
+					{
+						System.out.println("Audio: " + sample.getTimeStamp() + " " + " Video: " + this.picture.getTimeStamp() + " Difference(ms): " 
+																				+ (sample.getTimeStamp()/1000 - this.picture.getTimeStamp()/1000));
+						container.seekKeyFrame(videoStreamId, sample.getTimeStamp() - SYNC_TOLERANCE * 1000, sample.getTimeStamp(), 
+															sample.getTimeStamp() + 1000* SYNC_TOLERANCE, IContainer.SEEK_FLAG_FRAME);
+						sample.setTimeStamp(picture.getTimeStamp());
+					}*/
+					if(packet.getStreamIndex() == videoStreamId) 
+					{
+						// Attempt to read the entire packet
+						int offset = 0;
+						while(offset < this.packet.getSize()) {
+							// Decode the video, checking for any errors
+							int bytesDecoded = vCoder.decodeVideo(this.picture, this.packet, offset);
+							
+							if (bytesDecoded < 0) {
+								throw new RuntimeException("Got error decoding video");
+							}
+							offset += bytesDecoded;
+
+							/* Some decoders will consume data in a packet, but will not
+							 * be able to construct a full video picture yet. Therefore
+							 * you should always check if you got a complete picture
+							 * from the decoder
+							 */
+							if (this.picture.isComplete()) {
+								IVideoPicture pic = IVideoPicture.make(this.picture);
+								pic.setTimeStamp(this.picture.getTimeStamp());
+								readLock.lock();
+								pictures.enqueue(pic);
+								readLock.unlock();
+							}
+						}
+					}
+					else if(packet.getStreamIndex() == audioStreamId)
+					{
+						int offset = 0;
+						while(offset < this.packet.getSize())
+				        {
+							 int bytesDecoded = aCoder.decodeAudio(this.sample, this.packet, offset);
+							 if (bytesDecoded < 0)
+								 throw new RuntimeException("got error decoding audio in: " + videoPath);
+					          offset += bytesDecoded;
+				        }
+						if(sample.isComplete())
+						{
+							readLock.lock();
+							samples.enqueue(new AudioFrame(this.sample.getData().getByteArray(0, sample.getSize()), sample.getTimeStamp()));
+							readLock.unlock();
+						}
+						
+					}
+					
+				}
+				System.out.println("Video decoding complete");
+				this.decoderComplete = true;
+				//wait until notified that packets are done draining
+				synchronized(this)
+				{
+					try {
+						this.wait();
+					} catch (InterruptedException e) {
+						videoComplete = true;
+						this.container.close();
+						e.printStackTrace();
+					}
+				}
+				Gdx.app.log("Status", videoPath + " completed playing successfully.");
+				videoComplete = true;
+				this.container.close();
 		}
 		
 		
+		public boolean isDecoderComplete() {
+			return decoderComplete;
+		}
+
+		public IVideoPicture getVideoFrame()
+		{
+			IVideoPicture picture = null;
+			if(pictures.getCount() > 0)
+			{
+				readLock.lock();
+				picture = pictures.dequeue();
+				readLock.unlock();
+			}
+			return picture;
+		}
+		
+		public AudioFrame getAudioFrame()
+		{
+			AudioFrame sample =null;
+			if(samples.getCount() > 0)
+			{
+				readLock.lock();
+				sample = samples.dequeue();
+				readLock.unlock();
+			}
+			return sample;
+		}
+
+		public int getNumAudioPackets() {
+			return samples.getCount();
+		}
+
+		public int getNumVideoPackets() {
+			return pictures.getCount();
+		}
+	}
+	
+	private class AudioFrame
+	{
+		
+		public byte[] byteArray;
+		public long timeStamp;
+		public AudioFrame(byte[] byteArray, long timeStamp)
+		{
+			this.byteArray = byteArray;
+			this.timeStamp = timeStamp;
+		}
 	}
 
+	public int getNumAudioPackets() {
+		if(packetHandlerRunnable != null)
+			return this.packetHandlerRunnable.getNumAudioPackets();
+		else 
+			return 0;
+	}
+
+	public int getNumVideoPackets() {
+		if(packetHandlerRunnable != null)
+			return this.packetHandlerRunnable.getNumVideoPackets();
+		else
+			return 0;
+	}
+		
 }
+	
+
+
