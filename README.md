@@ -12,6 +12,20 @@ This project was forked from https://github.com/aaronsnoswell/LibGDXVideoSample
 A tip of the cap to Aaron Snoswell for doing the basic work necessary to make this project possible.
 We've taken this work and done some optimization and added audio support.
 
+#0.1.3 changes
+
+- Fixed the big stuttering occurring when a video starts playing
+
+- Offloaded the video picture conversion to the packet handler thread
+for a minor bump in framerate
+
+- Added a bunch of documentation 
+
+- Cleaned up a bunch of unused variables and cleaned up warnings from the code
+
+- Added more functionality to the video screen class to increase
+its usefullness
+
 #0.1.2 changes
 
 - major re-write of the playback algorithm
