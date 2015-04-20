@@ -4,11 +4,8 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ShortBuffer;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -19,27 +16,20 @@ import javax.sound.sampled.DataLine;
 import javax.sound.sampled.LineUnavailableException;
 import javax.sound.sampled.SourceDataLine;
 
-import com.badlogic.gdx.ApplicationAdapter;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.audio.AudioDevice;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.evolve.dataStruct.Queue;
-import com.evolve.pixeldefender.GameManager;
-import com.xuggle.ferry.IBuffer;
-import com.xuggle.xuggler.Global;
 import com.xuggle.xuggler.IAudioSamples;
 import com.xuggle.xuggler.ICodec;
 import com.xuggle.xuggler.IContainer;
 import com.xuggle.xuggler.IPacket;
-import com.xuggle.xuggler.IPixelFormat;
 import com.xuggle.xuggler.IStream;
 import com.xuggle.xuggler.IStreamCoder;
 import com.xuggle.xuggler.IVideoPicture;
 import com.xuggle.xuggler.IVideoResampler;
-import com.xuggle.xuggler.Utils;
 import com.xuggle.xuggler.video.ConverterFactory;
 import com.xuggle.xuggler.video.IConverter;
 
@@ -52,9 +42,6 @@ import com.xuggle.xuggler.video.IConverter;
  * 
  * April 8th 2015 - Audio support added by @author Sean Brophy
  * courtesy of Evolve Interactive Inc.
- * 3732 Knight St.
- * Vancouver, BC
- * V5N 3L6
  * www.evolveinteractive.ca
  */
 public class VideoPlayer {
@@ -69,9 +56,6 @@ public class VideoPlayer {
 	private FileHandle fileHandle;
 	private InputStream inputStream;
 	
-	//the audio device to write output
-	private AudioDevice gdxAudioDevice = null;
-	
 	private Texture texture;
 	
 	private PlayState playState = PlayState.STOPPED;
@@ -84,39 +68,31 @@ public class VideoPlayer {
 
 	private IContainer container;
 	
-	private long firstTimestampMilliseconds = Global.NO_PTS;
 	
 	// The tollerance used when waiting for the playhead to catch up
 	private static final long SYNC_TOLERANCE_MICROSECONDS = 75000;
 	//used to tell if audio is finished (if there are no threads writing out audio data)
-	public int writeOutThreadCount;
+	private int writeOutThreadCount = 0;
 	
 	private static SourceDataLine mLine;
 	
-	int videoStreamId = -1;
-	IStreamCoder videoCoder = null;
+	private int videoStreamId = -1;
+	private IStreamCoder videoCoder = null;
 	
 	//the audio stream from the codec
-	int audioStreamId = -1;
-	IStreamCoder audioCoder = null;
+	private int audioStreamId = -1;
+	private IStreamCoder audioCoder = null;
 	
-	IVideoResampler resampler = null;
-	IPacket packet = IPacket.make();
+	private ExecutorService writeOutPool;
 	
-	long sleepTimeoutMilliseconds = 0;
-	
-	ExecutorService writeOutPool;
-
-	private IConverter converter;
-	private IVideoPicture picture;
-	
-	VideoScreen screen;
+	private VideoScreen screen;
 	private long videoTimeStamp;
 	private long audioTimeStamp;
 	
-	Thread packetHandlerThread;
+	private Thread packetHandlerThread;
 	private PacketHandler packetHandlerRunnable;
 	public boolean videoComplete = false;
+	private boolean playbackComplete = false;
 	
 	
 	/**
@@ -150,6 +126,7 @@ public class VideoPlayer {
 	/**
 	 * Plays the video stream, or resumes it if it was paused
 	 */
+	@SuppressWarnings("deprecation")
 	public void play() {
 		
 		if(container == null) {
@@ -218,24 +195,13 @@ public class VideoPlayer {
 			if (videoCoder.open() < 0) {
 				throw new RuntimeException("Could not open video decoder for container: " + videoPath);
 			}
-			
-			this.picture = IVideoPicture.make(
-					videoCoder.getPixelType(),
-					videoCoder.getWidth(),
-					videoCoder.getHeight()
-				);
-			
-			/* Query the first timestamp in the stream
-			 * Timestamps are in microseconds - convert to milli
-			 */
-			firstTimestampMilliseconds = container.getStartTime() / 1000;
 		}
 		//samples.setTimeStamp(picture.getTimeStamp());
 		this.packetHandlerRunnable = new PacketHandler(container);
 		this.packetHandlerThread = new Thread(packetHandlerRunnable);
 		this.packetHandlerThread.start();
 		playState = PlayState.PLAYING;
-		System.out.println("Video Player Playing");
+		Gdx.app.log("Status","Video Player Playing");
 	}
 	
 	/**
@@ -270,9 +236,10 @@ public class VideoPlayer {
 		setDefaultTexture();
 		
 		playState = PlayState.STOPPED;
-		System.out.println("Video Player Stopped");
+		Gdx.app.log("Status","Video Player Stopped");
 	}
 	
+	/** Sets the screen to a default black texture*/
 	private void setDefaultTexture()
 	{
 		texture = new Texture(new FileHandle("mov/black.png"));
@@ -295,18 +262,19 @@ public class VideoPlayer {
 	}
 	
 	/**
-	 * Updates the video play head
-	 * @param dtSeconds The elapsed time since the last call to update(),
-	 * 	in seconds
-	 * @return True if the video texture has changed, false otherwise
+	 * Empties the audio queue into the sound device
+	 * and grabs a video frame for playback.
+	 * If the video is behind, grabs a frame that's further ahead
 	 */
 	public void update(float dtSeconds) {
 		if(playState != PlayState.PLAYING) return;
 	
 		this.playTimeMilliseconds += dtSeconds*1000;
 		AudioFrame newAudioFrame = this.packetHandlerRunnable.getAudioFrame(); 
-		IVideoPicture newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
-		this.picture = newVideoFrame;
+		VideoFrame newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
+		
+		if(newVideoFrame != null)
+			this.videoTimeStamp = newVideoFrame.timeStamp;
 		
 		if(this.packetHandlerRunnable.getNumAudioPackets() <= 0 
 				&& this.packetHandlerRunnable.getNumVideoPackets() <= 0 
@@ -315,6 +283,7 @@ public class VideoPlayer {
 			synchronized(packetHandlerRunnable)
 			{
 				this.packetHandlerRunnable.notify();
+				this.playbackComplete = true;
 			}
 		}
 
@@ -322,40 +291,31 @@ public class VideoPlayer {
 		//packet decoder is decoding audio even as this code runs, if you don't it sounds like crap
 		while(newAudioFrame!= null)
 		{
-
 			this.writeOutPool.execute(new WriteOutSoundBytes(newAudioFrame.byteArray, newAudioFrame.timeStamp));
 			newAudioFrame = this.packetHandlerRunnable.getAudioFrame();
 		}
 		//if the video is behind the audio, read ahead some frames 
-		while(newVideoFrame != null && (newVideoFrame.getTimeStamp() <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS || writeOutThreadCount == 0))
+		while(newVideoFrame != null && (newVideoFrame.timeStamp <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS || writeOutThreadCount == 0))
 		{
-			//this.videoUpdated = true;
-			videoTimeStamp = newVideoFrame.getTimeStamp();
 			newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
-			this.picture = newVideoFrame;
+			if(newVideoFrame != null)
+				videoTimeStamp = newVideoFrame.timeStamp;
 		}
 		
 		if(newVideoFrame != null) 
 		{
-			// Attempt to read the entire packet
-			int offset = 0;
-			IVideoPicture newPic = picture.copyReference();
-			
-
-			//converts the image to the desired format, added some optimization here, since the
-			//old code was using an old inefficient method for doing this
-			if(this.converter == null)
-				this.converter = ConverterFactory.createConverter(ConverterFactory.XUGGLER_BGR_24, newPic);
-			BufferedImage javaImage = converter.toImage(newPic);
-			
 			// Update the current texture (now done via callback)
-			updateTexture(javaImage);	
+			updateTexture(newVideoFrame.image);	
 		}
 		if(videoComplete)
 			stop();
 
 	}
 	
+	public boolean isPlaybackComplete() {
+		return playbackComplete;
+	}
+
 	public long getAudioTimeStamp() {
 		return audioTimeStamp;
 	}
@@ -396,6 +356,10 @@ public class VideoPlayer {
 		return texture;
 	}
 	
+	/*
+	 * We use Java sound because libGDX does not offer low-level enough functionality
+	 * to write through the libgDX sound system.
+	 */
 	private static void openJavaSound(IStreamCoder aAudioCoder)
 	{
 	    AudioFormat audioFormat = new AudioFormat(aAudioCoder.getSampleRate(),
@@ -467,6 +431,10 @@ public class VideoPlayer {
 	    }
 	}
 	
+	/*
+	 * A runnable that we use to write out the sound. By using these threads with SingleThreadExecutor
+	 * we keep the audio always writing out without blocking the video decoding. This lets us
+	 * play back the audio without skips or pops.*/
 	private class WriteOutSoundBytes implements Runnable
 	{
 		private byte[] rawByte;
@@ -488,21 +456,32 @@ public class VideoPlayer {
 		}
 	}
 	
+	/** The packet handler is the heavy lifter of our video player. It decodes a packet
+	 * and puts it in the appropriate queue (video or audio). If it gets too far ahead,
+	 * the thread sleeps while the player outputs the video and catches up. */
 	private class PacketHandler implements Runnable
 	{
-		IPacket packet;
-		IContainer container;
-		IAudioSamples sample;
-		IVideoPicture picture;
+		private IPacket packet;
+		private IContainer container;
+		private IAudioSamples sample;
+		private IVideoPicture picture;
 		
-		private final long PREBUFFER = 500;
-		Queue<IVideoPicture> pictures;
+		/*
+		 * shortening the prebuffer effectively defers video decoding over a longer period
+		 * we do this as an optimization strategy to avoid stutters in the video image
+		 * since the video syncs off the audio (and not the opposite)
+		 */
+		private final long PREBUFFER = 40;
+		
+		Queue<VideoFrame> pictures;
 		Queue<AudioFrame> samples;
 		Lock readLock;
 
 		private IStreamCoder aCoder;
 		private IStreamCoder vCoder;
 		private boolean decoderComplete;
+		
+		private IConverter converter;
 		
 		
 		public PacketHandler(IContainer container)
@@ -520,27 +499,27 @@ public class VideoPlayer {
 			this.vCoder = videoCoder.copyReference();
 			this.readLock = new ReentrantLock();
 			this.samples = new Queue<AudioFrame>();
-			this.pictures = new Queue<IVideoPicture>();
+			this.pictures = new Queue<VideoFrame>();
+			
 		}
 		
 		@Override
 		public void run() 
 		{
-				
+				//the sleep logic is contained here
 				while(this.container.readNextPacket(packet) >= 0) {
-					/*if(samples.getCount() >= 2)
+					if(samples.getCount() >= 2)
 					{
-						while(samples.getCount() >= 2 && samples.peekLast().timeStamp - samples.peekNext().timeStamp > PREBUFFER * 1000)
+						while(pictures.getCount() >= 2 && pictures.peekLast().timeStamp - pictures.peekNext().timeStamp > PREBUFFER * 1000)
 						{
 							try {
 								Thread.sleep(PREBUFFER/2);
 							} catch (InterruptedException e) {
-								// TODO Auto-generated catch block
 								e.printStackTrace();
 							}
 						}
 						
-					}*/
+					}
 					
 					//LEAVING THIS BIT IN IN-CASE WE WANT TO USE IT LATER
 					/*If the difference between the audio and the video is above the threshold for human perception (about 75ms), seek
@@ -556,6 +535,7 @@ public class VideoPlayer {
 															sample.getTimeStamp() + 1000* SYNC_TOLERANCE, IContainer.SEEK_FLAG_FRAME);
 						sample.setTimeStamp(picture.getTimeStamp());
 					}*/
+					//if it's a video packet, decode it, and create our VideoFrame and put it in the queue
 					if(packet.getStreamIndex() == videoStreamId) 
 					{
 						// Attempt to read the entire packet
@@ -577,12 +557,21 @@ public class VideoPlayer {
 							if (this.picture.isComplete()) {
 								IVideoPicture pic = IVideoPicture.make(this.picture);
 								pic.setTimeStamp(this.picture.getTimeStamp());
+								IVideoPicture newPic = picture.copyReference();
+								
+
+								//converts the image to the desired format, added some optimization here, since the
+								//old code was using an old inefficient method for doing this
+								if(this.converter == null)
+									this.converter = ConverterFactory.createConverter(ConverterFactory.XUGGLER_BGR_24, newPic);
+								BufferedImage javaImage = converter.toImage(newPic);
 								readLock.lock();
-								pictures.enqueue(pic);
+								pictures.enqueue(new VideoFrame(javaImage, picture.getTimeStamp()));
 								readLock.unlock();
 							}
 						}
 					}
+					//if it's an audio file, create an audioframe and put it in the queue
 					else if(packet.getStreamIndex() == audioStreamId)
 					{
 						int offset = 0;
@@ -603,7 +592,7 @@ public class VideoPlayer {
 					}
 					
 				}
-				System.out.println("Video decoding complete");
+				Gdx.app.log("Status","Video decoding complete");
 				this.decoderComplete = true;
 				//wait until notified that packets are done draining
 				synchronized(this)
@@ -626,9 +615,9 @@ public class VideoPlayer {
 			return decoderComplete;
 		}
 
-		public IVideoPicture getVideoFrame()
+		public VideoFrame getVideoFrame()
 		{
-			IVideoPicture picture = null;
+			VideoFrame picture = null;
 			if(pictures.getCount() > 0)
 			{
 				readLock.lock();
@@ -656,6 +645,17 @@ public class VideoPlayer {
 
 		public int getNumVideoPackets() {
 			return pictures.getCount();
+		}
+	}
+	
+	private class VideoFrame
+	{
+		public BufferedImage image;
+		public long timeStamp;
+		public VideoFrame(BufferedImage image, long timeStamp)
+		{
+			this.image = image;
+			this.timeStamp = timeStamp;
 		}
 	}
 	

@@ -24,23 +24,38 @@ public class VideoScreen implements Screen, InputProcessor {
 	
 	private OrthographicCamera camera;
 	private SpriteBatch batch;
-	private VideoPlayer textureProvider;
+	private VideoPlayer videoPlayer;
 	public Sprite sprite;
 	
-	private String video_path = "mov/big_buck_bunny_trailer_400p.ogg";
+	private String video_path;
 	private SpriteBatch fontBatch;
 	private BitmapFont font;
-
 	
+	private Runnable onComplete;
+	private boolean debugOn;
+
+	/** Creates a new video screen that will play the video from the specified path
+	 * @param video_path the relative path of the video*/
 	public VideoScreen(String video_path)
 	{
-		
+		this.video_path = video_path;
+		onComplete = null;
+	}
+	
+	/** Creates a new video screen that will play the video from the specified path
+	 * and will run the specified runnable when the video is finished
+	 * @param video_path the video path
+	 * @param onComplete the runnable to run on completion*/
+	public VideoScreen(String video_path, Runnable onComplete)
+	{
+		this.onComplete = onComplete;
+		this.video_path = video_path;
 	}
 	
 	@Override
 	public void dispose() {
 		batch.dispose();
-		textureProvider.dispose();
+		videoPlayer.dispose();
 	}
 
 	@Override
@@ -65,7 +80,7 @@ public class VideoScreen implements Screen, InputProcessor {
 		
 		// Stop on enter
 		if(keycode == Keys.ENTER) {
-			textureProvider.stop();
+			videoPlayer.stop();
 			return true;
 		}
 		
@@ -86,10 +101,10 @@ public class VideoScreen implements Screen, InputProcessor {
 	public boolean touchUp(int screenX, int screenY, int pointer, int button) {
 		
 		// Toggle play/pause on touch
-		if(textureProvider.getState() != VideoPlayer.PlayState.PLAYING) {
-			textureProvider.play();
+		if(videoPlayer.getState() != VideoPlayer.PlayState.PLAYING) {
+			videoPlayer.play();
 		} else {
-			textureProvider.pause();
+			videoPlayer.pause();
 		}
 		
 		return true;
@@ -117,7 +132,7 @@ public class VideoScreen implements Screen, InputProcessor {
 		Gdx.gl.glClearColor(0, 0, 0, 0);
 		Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 		
-		textureProvider.update(dt);
+		videoPlayer.update(dt);
 		
 		batch.setProjectionMatrix(camera.combined);
 		batch.begin();
@@ -126,6 +141,8 @@ public class VideoScreen implements Screen, InputProcessor {
 		fontBatch.begin();
 		this.printDebugOutput(fontBatch);
 		fontBatch.end();
+		if(videoPlayer.videoComplete && onComplete != null)
+			onComplete.run();
 		
 	}
 
@@ -144,24 +161,36 @@ public class VideoScreen implements Screen, InputProcessor {
 		fontBatch = new SpriteBatch();
 		Gdx.input.setInputProcessor(this);
 		
-		textureProvider = new VideoPlayer(video_path, this);
+		videoPlayer = new VideoPlayer(video_path, this);
 		//textureProvider.play();
 	}
 	
+	//draws relevant debug info to the screen
 	private void printDebugOutput(SpriteBatch batch)
 	{
-		font.setColor(Color.WHITE);
-		font.draw(batch, "FPS: " + String.format("%d", Gdx.graphics.getFramesPerSecond()), 20, GameManager.VIRTUAL_VP_HEIGHT - 5);
-		font.draw(batch, "Audio Timestamp: " + String.format("%d", textureProvider.getAudioTimeStamp()), 100, GameManager.VIRTUAL_VP_HEIGHT - 5);
-		font.draw(batch, "Video Timestamp: " + String.format("%d", textureProvider.getVideoTimeStamp()), 300, GameManager.VIRTUAL_VP_HEIGHT - 5);
-		font.draw(batch, "AudioPacketsQueued: " + String.format("%d", textureProvider.getNumAudioPackets()), 500, GameManager.VIRTUAL_VP_HEIGHT - 5);
-		font.draw(batch, "VideoPacketsQueued: " + String.format("%d", textureProvider.getNumVideoPackets()), 700, GameManager.VIRTUAL_VP_HEIGHT - 5);
-		font.draw(batch, "PlayTime(ms): " + String.format("%d", textureProvider.getPlayTimeMilliseconds()), 20, GameManager.VIRTUAL_VP_HEIGHT - 20);
-		
+		if(this.debugOn)
+		{
+			font.setColor(Color.WHITE);
+			font.draw(batch, "FPS: " + String.format("%d", Gdx.graphics.getFramesPerSecond()), 20, GameManager.VIRTUAL_VP_HEIGHT - 5);
+			font.draw(batch, "Audio Timestamp: " + String.format("%d", videoPlayer.getAudioTimeStamp()), 100, GameManager.VIRTUAL_VP_HEIGHT - 5);
+			font.draw(batch, "Video Timestamp: " + String.format("%d", videoPlayer.getVideoTimeStamp()), 300, GameManager.VIRTUAL_VP_HEIGHT - 5);
+			font.draw(batch, "AudioPacketsQueued: " + String.format("%d", videoPlayer.getNumAudioPackets()), 500, GameManager.VIRTUAL_VP_HEIGHT - 5);
+			font.draw(batch, "VideoPacketsQueued: " + String.format("%d", videoPlayer.getNumVideoPackets()), 700, GameManager.VIRTUAL_VP_HEIGHT - 5);
+			font.draw(batch, "PlayTime(ms): " + String.format("%d", videoPlayer.getPlayTimeMilliseconds()), 20, GameManager.VIRTUAL_VP_HEIGHT - 20);
+		}
 	}
 
 	@Override
 	public void hide() {
 		
 	}
+
+	public boolean isDebugOn() {
+		return debugOn;
+	}
+
+	public void setDebugOn(boolean debugOn) {
+		this.debugOn = debugOn;
+	}
+
 }
