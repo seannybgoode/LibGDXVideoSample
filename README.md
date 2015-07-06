@@ -1,4 +1,4 @@
-# libGDX-EvolveLiteMediaPlayerLibrary version 0.1.2
+# libGDX-EvolveLiteMediaPlayerLibrary version 0.1.3
 
 EvoLMPL - Written by Sean Brophy, courtesy of Evolve Interactive Inc. 
 sean@evolveinteractive.ca
@@ -11,6 +11,16 @@ This project was forked from https://github.com/aaronsnoswell/LibGDXVideoSample
 
 A tip of the cap to Aaron Snoswell for doing the basic work necessary to make this project possible.
 We've taken this work and done some optimization and added audio support.
+
+#0.1.4 changes
+
+- Fixed an issue where video playback could be far ahead of the audio
+
+- Moved some code from the update/render thread into the decoding thread
+
+- Optimized frame conversions to a texture(we were calling new unnecessarily in every draw call)
+
+- Added a mechanism for having a frame wait until the audio is in sync
 
 #0.1.3 changes
 

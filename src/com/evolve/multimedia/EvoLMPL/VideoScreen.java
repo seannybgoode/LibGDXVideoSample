@@ -1,13 +1,15 @@
 package com.evolve.multimedia.EvoLMPL;
 
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.Input.Keys;
+import com.badlogic.gdx.InputProcessor;
 import com.badlogic.gdx.Screen;
 import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -33,6 +35,7 @@ public class VideoScreen implements Screen, InputProcessor {
 	
 	private Runnable onComplete;
 	private boolean debugOn;
+	private Texture tex;
 
 	/** Creates a new video screen that will play the video from the specified path
 	 * @param video_path the relative path of the video*/
@@ -50,6 +53,19 @@ public class VideoScreen implements Screen, InputProcessor {
 	{
 		this.onComplete = onComplete;
 		this.video_path = video_path;
+	}
+	
+	public void setPixmap(Pixmap pix)
+	{
+		if(tex != null)
+		{
+			tex.draw(pix, 0, 0);
+		}
+		else
+		{
+			tex = new Texture(pix);
+			sprite.setTexture(tex);
+		}
 	}
 	
 	@Override
@@ -152,7 +168,7 @@ public class VideoScreen implements Screen, InputProcessor {
 		float h = Gdx.graphics.getHeight();
 		this.font  = new BitmapFont(new FileHandle("fnt/Arial.fnt"), 
 				new FileHandle("fnt/Arial_0.tga"), false);
-		font.setScale(0.5f, 0.5f);
+		font.getData().setScale(0.5f, 0.5f);
 		font.setColor(new Color(1.0f, 1.0f, 1.0f, 1.0f));
 
 		camera = new OrthographicCamera(1, h/w);

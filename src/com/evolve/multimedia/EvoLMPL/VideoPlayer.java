@@ -70,7 +70,7 @@ public class VideoPlayer {
 	
 	
 	// The tollerance used when waiting for the playhead to catch up
-	private static final long SYNC_TOLERANCE_MICROSECONDS = 75000;
+	private static final long SYNC_TOLERANCE_MICROSECONDS = 10000;
 	//used to tell if audio is finished (if there are no threads writing out audio data)
 	private int writeOutThreadCount = 0;
 	
@@ -93,6 +93,10 @@ public class VideoPlayer {
 	private PacketHandler packetHandlerRunnable;
 	public boolean videoComplete = false;
 	private boolean playbackComplete = false;
+	private VideoFrame newVideoFrame;
+	private int waitingFrameCount;
+	private long waitTime;
+	private float timeWaiting;
 	
 	
 	/**
@@ -269,11 +273,30 @@ public class VideoPlayer {
 	public void update(float dtSeconds) {
 		if(playState != PlayState.PLAYING) return;
 	
+		this.timeWaiting += dtSeconds;
+		//if the video frame is not too far ahead of the audio, play it
+		if(newVideoFrame != null && (newVideoFrame.timeStamp <= audioTimeStamp + SYNC_TOLERANCE_MICROSECONDS 
+																			|| this.timeWaiting >= waitTime)) 
+		{
+			// Update the current texture (now done via callback)
+			updateTexture(newVideoFrame.image);	
+			newVideoFrame = null;
+		}
+		else if(newVideoFrame != null)
+		{
+			this.waitTime = newVideoFrame.timeStamp - audioTimeStamp;
+			this.timeWaiting = 0;
+		}
+				
+		
 		this.playTimeMilliseconds += dtSeconds*1000;
 		AudioFrame newAudioFrame = this.packetHandlerRunnable.getAudioFrame(); 
-		VideoFrame newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
 		
-		if(newVideoFrame != null)
+		//if we haven't stashed a video frame to be played later, get a new frame
+		if(newVideoFrame == null)
+			this.newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
+		
+		if(newVideoFrame != null && this.videoTimeStamp <= audioTimeStamp + SYNC_TOLERANCE_MICROSECONDS)
 			this.videoTimeStamp = newVideoFrame.timeStamp;
 		
 		if(this.packetHandlerRunnable.getNumAudioPackets() <= 0 
@@ -294,19 +317,18 @@ public class VideoPlayer {
 			this.writeOutPool.execute(new WriteOutSoundBytes(newAudioFrame.byteArray, newAudioFrame.timeStamp));
 			newAudioFrame = this.packetHandlerRunnable.getAudioFrame();
 		}
+		
 		//if the video is behind the audio, read ahead some frames 
 		while(newVideoFrame != null && (newVideoFrame.timeStamp <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS || writeOutThreadCount == 0))
 		{
 			newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
 			if(newVideoFrame != null)
 				videoTimeStamp = newVideoFrame.timeStamp;
-		}
+		}	
+
 		
-		if(newVideoFrame != null) 
-		{
-			// Update the current texture (now done via callback)
-			updateTexture(newVideoFrame.image);	
-		}
+	
+		
 		if(videoComplete)
 			stop();
 
@@ -339,8 +361,7 @@ public class VideoPlayer {
 			ImageIO.write(img, "bmp", baos);
 			byte[] bytes = baos.toByteArray();
 			Pixmap pix = new Pixmap(bytes, 0, bytes.length);
-			texture = new Texture(pix);
-			screen.sprite.setTexture(texture);
+			screen.setPixmap(pix);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -471,7 +492,7 @@ public class VideoPlayer {
 		 * we do this as an optimization strategy to avoid stutters in the video image
 		 * since the video syncs off the audio (and not the opposite)
 		 */
-		private final long PREBUFFER = 40;
+		private final long PREBUFFER = 100;
 		
 		Queue<VideoFrame> pictures;
 		Queue<AudioFrame> samples;
