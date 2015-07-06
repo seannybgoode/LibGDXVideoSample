@@ -1,4 +1,4 @@
-package com.evolve.dataStruct;
+package com.evolve.datastruct;
 
 /** An Abstract Data Type queue.
  * Stores items in the order that they were inserted.

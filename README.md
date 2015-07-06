@@ -12,6 +12,18 @@ This project was forked from https://github.com/aaronsnoswell/LibGDXVideoSample
 A tip of the cap to Aaron Snoswell for doing the basic work necessary to make this project possible.
 We've taken this work and done some optimization and added audio support.
 
+#0.1.5 changes
+-fixed the missing java class Node
+
+-removed references to the proprietary GameManager class
+
+-added executable test applications
+
+-added missing jars to the git index, they were missing for some reason
+
+-added pom.xml for maven dependency management (thanks Piotr Jastrzebski!)
+
+
 #0.1.4 changes
 
 - Fixed an issue where video playback could be far ahead of the audio

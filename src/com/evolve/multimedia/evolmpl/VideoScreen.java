@@ -1,4 +1,4 @@
-package com.evolve.multimedia.EvoLMPL;
+package com.evolve.multimedia.evolmpl;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
@@ -13,7 +13,7 @@ import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.evolve.pixeldefender.GameManager;
+
 
 /**
  * libGDX Screen extension for playing videos. Specify the video file path in the 
@@ -36,6 +36,8 @@ public class VideoScreen implements Screen, InputProcessor {
 	private Runnable onComplete;
 	private boolean debugOn;
 	private Texture tex;
+	private float w;
+	private float h;
 
 	/** Creates a new video screen that will play the video from the specified path
 	 * @param video_path the relative path of the video*/
@@ -164,15 +166,15 @@ public class VideoScreen implements Screen, InputProcessor {
 
 	@Override
 	public void show() {
-		float w = Gdx.graphics.getWidth();
-		float h = Gdx.graphics.getHeight();
+		this.w = Gdx.graphics.getWidth();
+		this.h = Gdx.graphics.getHeight();
 		this.font  = new BitmapFont(new FileHandle("fnt/Arial.fnt"), 
 				new FileHandle("fnt/Arial_0.tga"), false);
 		font.getData().setScale(0.5f, 0.5f);
 		font.setColor(new Color(1.0f, 1.0f, 1.0f, 1.0f));
 
 		camera = new OrthographicCamera(1, h/w);
-		camera.zoom = camera.zoom - 0.5f;
+		//camera.zoom = camera.zoom - 1.5f;
 		batch = new SpriteBatch();
 		fontBatch = new SpriteBatch();
 		Gdx.input.setInputProcessor(this);
@@ -184,15 +186,16 @@ public class VideoScreen implements Screen, InputProcessor {
 	//draws relevant debug info to the screen
 	private void printDebugOutput(SpriteBatch batch)
 	{
+		float h = Gdx.graphics.getHeight();
 		if(this.debugOn)
 		{
 			font.setColor(Color.WHITE);
-			font.draw(batch, "FPS: " + String.format("%d", Gdx.graphics.getFramesPerSecond()), 20, GameManager.VIRTUAL_VP_HEIGHT - 5);
-			font.draw(batch, "Audio Timestamp: " + String.format("%d", videoPlayer.getAudioTimeStamp()), 100, GameManager.VIRTUAL_VP_HEIGHT - 5);
-			font.draw(batch, "Video Timestamp: " + String.format("%d", videoPlayer.getVideoTimeStamp()), 300, GameManager.VIRTUAL_VP_HEIGHT - 5);
-			font.draw(batch, "AudioPacketsQueued: " + String.format("%d", videoPlayer.getNumAudioPackets()), 500, GameManager.VIRTUAL_VP_HEIGHT - 5);
-			font.draw(batch, "VideoPacketsQueued: " + String.format("%d", videoPlayer.getNumVideoPackets()), 700, GameManager.VIRTUAL_VP_HEIGHT - 5);
-			font.draw(batch, "PlayTime(ms): " + String.format("%d", videoPlayer.getPlayTimeMilliseconds()), 20, GameManager.VIRTUAL_VP_HEIGHT - 20);
+			font.draw(batch, "FPS: " + String.format("%d", Gdx.graphics.getFramesPerSecond()), 20, h - 5);
+			font.draw(batch, "Audio Timestamp: " + String.format("%d", videoPlayer.getAudioTimeStamp()), 100, h - 5);
+			font.draw(batch, "Video Timestamp: " + String.format("%d", videoPlayer.getVideoTimeStamp()), 300, h - 5);
+			font.draw(batch, "AudioPacketsQueued: " + String.format("%d", videoPlayer.getNumAudioPackets()), 500, h - 5);
+			font.draw(batch, "VideoPacketsQueued: " + String.format("%d", videoPlayer.getNumVideoPackets()), 700, h - 5);
+			font.draw(batch, "PlayTime(ms): " + String.format("%d", videoPlayer.getPlayTimeMilliseconds()), 20, h - 20);
 		}
 	}
 
