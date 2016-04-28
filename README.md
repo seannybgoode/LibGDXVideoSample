@@ -1,4 +1,4 @@
-# libGDX-EvolveLiteMediaPlayerLibrary version 0.1.3
+# libGDX-EvolveLiteMediaPlayerLibrary version 0.1.5
 
 EvoLMPL - Written by Sean Brophy, courtesy of Evolve Interactive Inc. 
 sean@evolveinteractive.ca
@@ -13,6 +13,9 @@ A tip of the cap to Aaron Snoswell for doing the basic work necessary to make th
 We've taken this work and done some optimization and added audio support.
 
 #0.1.5 changes
+-fixed a bug where the timestamp was being set by the last decoded audio frame, time is now kept by the total audio playtime
+which we get from the Java audio stream
+
 -fixed the missing java class Node
 
 -removed references to the proprietary GameManager class
