@@ -1,7 +1,7 @@
 # libGDX-EvolveLiteMediaPlayerLibrary version 0.1.5
 
-EvoLMPL - Written by Sean Brophy, courtesy of Evolve Interactive Inc. 
-sean@evolveinteractive.ca
+EvoLMPL - Written by Sean Brophy
+sjbrophy.eastvan@gmail.com
 
 The Evolve Lite Media Player Library represents a lightweight media player library designed to 
 permit playing media files from within a libGDX instance. It is unknown if this will work on Andriod/mobile
