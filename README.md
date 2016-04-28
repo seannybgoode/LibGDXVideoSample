@@ -13,18 +13,17 @@ A tip of the cap to Aaron Snoswell for doing the basic work necessary to make th
 We've taken this work and done some optimization and added audio support.
 
 #0.1.5 changes
--fixed a bug where the timestamp was being set by the last decoded audio frame, time is now kept by the total audio playtime
-which we get from the Java audio stream
+- fixed a bug where the timestamp was being set by the last decoded audio frame, time is now kept by the total audio playtime which we get from the Java audio stream
 
--fixed the missing java class Node
+- fixed the missing java class Node
 
--removed references to the proprietary GameManager class
+- removed references to the proprietary GameManager class
 
--added executable test applications
+- added executable test applications
 
--added missing jars to the git index, they were missing for some reason
+- added missing jars to the git index, they were missing for some reason
 
--added pom.xml for maven dependency management (thanks Piotr Jastrzebski!)
+- added pom.xml for maven dependency management (thanks Piotr Jastrzebski!)
 
 
 #0.1.4 changes
