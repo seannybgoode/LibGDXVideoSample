@@ -70,9 +70,8 @@ public class VideoPlayer {
 	
 	
 	// The tollerance used when waiting for the playhead to catch up
-	private static final long SYNC_TOLERANCE_MICROSECONDS = 10000;
+	private static final long SYNC_TOLERANCE_MICROSECONDS = 1000000;
 	//used to tell if audio is finished (if there are no threads writing out audio data)
-	private int writeOutThreadCount = 0;
 	
 	private static SourceDataLine mLine;
 	
@@ -94,9 +93,9 @@ public class VideoPlayer {
 	public boolean videoComplete = false;
 	private boolean playbackComplete = false;
 	private VideoFrame newVideoFrame;
-	private int waitingFrameCount;
 	private long waitTime;
 	private float timeWaiting;
+	private int videoFrame;
 	
 	
 	/**
@@ -272,7 +271,8 @@ public class VideoPlayer {
 	 */
 	public void update(float dtSeconds) {
 		if(playState != PlayState.PLAYING) return;
-	
+			
+		
 		this.timeWaiting += dtSeconds;
 		//if the video frame is not too far ahead of the audio, play it
 		if(newVideoFrame != null && (newVideoFrame.timeStamp <= audioTimeStamp + SYNC_TOLERANCE_MICROSECONDS 
@@ -282,23 +282,51 @@ public class VideoPlayer {
 			updateTexture(newVideoFrame.image);	
 			newVideoFrame = null;
 		}
+		//otherwise wait to close the gap
 		else if(newVideoFrame != null)
 		{
+			this.avSyncValue = newVideoFrame.timeStamp - audioTimeStamp;
 			this.waitTime = newVideoFrame.timeStamp - audioTimeStamp;
 			this.timeWaiting = 0;
 		}
-				
-		
 		this.playTimeMilliseconds += dtSeconds*1000;
-		AudioFrame newAudioFrame = this.packetHandlerRunnable.getAudioFrame(); 
 		
 		//if we haven't stashed a video frame to be played later, get a new frame
 		if(newVideoFrame == null)
+		{
 			this.newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
+			
+		}
 		
-		if(newVideoFrame != null && this.videoTimeStamp <= audioTimeStamp + SYNC_TOLERANCE_MICROSECONDS)
-			this.videoTimeStamp = newVideoFrame.timeStamp;
+		//sets the timestamp
+		if(newVideoFrame != null && this.videoTimeStamp <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS)
+			this.videoTimeStamp = newVideoFrame.timeStamp;	
 		
+		
+
+		/**write out all the audio that you can, we do this so avoid breaks in the sound output
+		that present as skips, crackles and pops - note that packet decoder is decoding audio even as 
+		this code runs**/
+		AudioFrame newAudioFrame = this.packetHandlerRunnable.getAudioFrame(); 
+		while(newAudioFrame!= null)
+		{
+			this.writeOutPool.execute(new WriteOutSoundBytes(newAudioFrame.byteArray, newAudioFrame.timeStamp));
+			newAudioFrame = this.packetHandlerRunnable.getAudioFrame();
+		}
+		
+		
+		//this block was causing sync problems
+		//if the video is behind the audio, read ahead some frames 
+		while(newVideoFrame != null && (newVideoFrame.timeStamp <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS))
+		{
+			newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
+		}
+		if(newVideoFrame != null)
+			videoTimeStamp = newVideoFrame.timeStamp;
+
+		
+	
+		//detect if playback has completed
 		if(this.packetHandlerRunnable.getNumAudioPackets() <= 0 
 				&& this.packetHandlerRunnable.getNumVideoPackets() <= 0 
 				&& this.packetHandlerRunnable.isDecoderComplete())
@@ -309,26 +337,6 @@ public class VideoPlayer {
 				this.playbackComplete = true;
 			}
 		}
-
-		//write out all the damn audio that you can, 
-		//packet decoder is decoding audio even as this code runs, if you don't it sounds like crap
-		while(newAudioFrame!= null)
-		{
-			this.writeOutPool.execute(new WriteOutSoundBytes(newAudioFrame.byteArray, newAudioFrame.timeStamp));
-			newAudioFrame = this.packetHandlerRunnable.getAudioFrame();
-		}
-		
-		//if the video is behind the audio, read ahead some frames 
-		while(newVideoFrame != null && (newVideoFrame.timeStamp <= audioTimeStamp - SYNC_TOLERANCE_MICROSECONDS || writeOutThreadCount == 0))
-		{
-			newVideoFrame = this.packetHandlerRunnable.getVideoFrame();
-			if(newVideoFrame != null)
-				videoTimeStamp = newVideoFrame.timeStamp;
-		}	
-
-		
-	
-		
 		if(videoComplete)
 			stop();
 
@@ -350,6 +358,7 @@ public class VideoPlayer {
 		return videoTimeStamp;
 	}
 
+
 	/**
 	 * Updates the internal texture with new video data
 	 * @param img The new video frame data
@@ -362,6 +371,7 @@ public class VideoPlayer {
 			byte[] bytes = baos.toByteArray();
 			Pixmap pix = new Pixmap(bytes, 0, bytes.length);
 			screen.setPixmap(pix);
+			this.videoFrame ++;
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -459,22 +469,53 @@ public class VideoPlayer {
 	private class WriteOutSoundBytes implements Runnable
 	{
 		private byte[] rawByte;
-		private long timeStamp;
-		
 		
 		public WriteOutSoundBytes(byte[] rawBytes, long timeStamp)
 		{
 			rawByte = rawBytes;
-			this.timeStamp = timeStamp;
-			writeOutThreadCount ++;
+
 		}
 		@Override
 		public void run() 
 		{
 			mLine.write(rawByte, 0, rawByte.length);
-			audioTimeStamp = timeStamp;
-			writeOutThreadCount --;
+			audioTimeStamp = mLine.getMicrosecondPosition();
 		}
+	}
+	
+	public int getCurretAudioFrameNumber()
+	{
+		int returnVal = 0;
+		if(mLine != null && mLine.isActive())
+		{
+			returnVal = mLine.getFramePosition();
+		}
+		return returnVal; 
+	
+	}
+	
+	public int getCurrentVideoFrameNumber()
+	{
+		return this.videoFrame;
+	}
+	
+	public long getAudioPlaytime()
+	{
+		long returnVal = 0;
+		if(mLine != null && mLine.isActive())
+		{
+			returnVal = mLine.getMicrosecondPosition();
+		}
+		return returnVal; 	
+	}
+	
+	public String audioPlayerActive()
+	{
+		if(mLine != null)
+		{
+			return Boolean.toString(mLine.isActive());
+		}
+		return "";
 	}
 	
 	/** The packet handler is the heavy lifter of our video player. It decodes a packet
@@ -529,9 +570,12 @@ public class VideoPlayer {
 		{
 				//the sleep logic is contained here
 				while(this.container.readNextPacket(packet) >= 0) {
-					if(samples.getCount() >= 2)
+				
+				//this block was causing audio distortions by causing the whole decoder to sleep	
+				/*	if(samples.getCount() >= 2)
 					{
-						while(pictures.getCount() >= 2 && pictures.peekLast().timeStamp - pictures.peekNext().timeStamp > PREBUFFER * 1000)
+						while(pictures.getCount() >= 2 
+										&& pictures.peekLast().timeStamp - pictures.peekNext().timeStamp > PREBUFFER * 1000)
 						{
 							try {
 								Thread.sleep(PREBUFFER/2);
@@ -540,22 +584,8 @@ public class VideoPlayer {
 							}
 						}
 						
-					}
-					
-					//LEAVING THIS BIT IN IN-CASE WE WANT TO USE IT LATER
-					/*If the difference between the audio and the video is above the threshold for human perception (about 75ms), seek
-					 * the video ahead. TODO experiment with seeking the audio backwards. Or seeking both to a middle point.*/
-					/*avSyncValue = (this.sample.getTimeStamp()/1000 - this.picture.getTimeStamp()/1000);
-					videoTimeStamp = this.picture.getTimeStamp();
-					audioTimeStamp = this.sample.getTimeStamp();
-					if(sample.getTimeStamp()/1000 - picture.getTimeStamp()/1000 > SYNC_TOLERANCE)
-					{
-						System.out.println("Audio: " + sample.getTimeStamp() + " " + " Video: " + this.picture.getTimeStamp() + " Difference(ms): " 
-																				+ (sample.getTimeStamp()/1000 - this.picture.getTimeStamp()/1000));
-						container.seekKeyFrame(videoStreamId, sample.getTimeStamp() - SYNC_TOLERANCE * 1000, sample.getTimeStamp(), 
-															sample.getTimeStamp() + 1000* SYNC_TOLERANCE, IContainer.SEEK_FLAG_FRAME);
-						sample.setTimeStamp(picture.getTimeStamp());
 					}*/
+					
 					//if it's a video packet, decode it, and create our VideoFrame and put it in the queue
 					if(packet.getStreamIndex() == videoStreamId) 
 					{

@@ -193,9 +193,13 @@ public class VideoScreen implements Screen, InputProcessor {
 			font.draw(batch, "FPS: " + String.format("%d", Gdx.graphics.getFramesPerSecond()), 20, h - 5);
 			font.draw(batch, "Audio Timestamp: " + String.format("%d", videoPlayer.getAudioTimeStamp()), 100, h - 5);
 			font.draw(batch, "Video Timestamp: " + String.format("%d", videoPlayer.getVideoTimeStamp()), 300, h - 5);
-			font.draw(batch, "AudioPacketsQueued: " + String.format("%d", videoPlayer.getNumAudioPackets()), 500, h - 5);
+			font.draw(batch, "A/V Sync Diff: " + String.format("%d", videoPlayer.getAvSyncValue()), 500, h - 5);
 			font.draw(batch, "VideoPacketsQueued: " + String.format("%d", videoPlayer.getNumVideoPackets()), 700, h - 5);
 			font.draw(batch, "PlayTime(ms): " + String.format("%d", videoPlayer.getPlayTimeMilliseconds()), 20, h - 20);
+			font.draw(batch, "AudioFramePlaying: " + String.format("%d", videoPlayer.getCurretAudioFrameNumber()), 150, h - 20);
+			font.draw(batch, "VideoFramePlaying: " + String.format("%d", videoPlayer.getCurrentVideoFrameNumber()), 350, h - 20);
+			font.draw(batch, "AudioPlaytime: " + String.format("%d", videoPlayer.getAudioPlaytime()), 600, h - 20);
+			font.draw(batch, "Audio I/O status: " +videoPlayer.audioPlayerActive(), 800, h -20);
 		}
 	}
 
