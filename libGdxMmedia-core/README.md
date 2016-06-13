@@ -1,11 +1,8 @@
-# libGDX-EvolveLiteMediaPlayerLibrary version 0.1.5
+# libGDX-MultiMedia version 0.1.6
 
-EvoLMPL - Written by Sean Brophy
-sjbrophy.eastvan@gmail.com
+libGDX-MultiMedia sjbrophy.eastvan@gmail.com
 
-The Evolve Lite Media Player Library represents a lightweight media player library designed to 
-permit playing media files from within a libGDX instance. It is unknown if this will work on Andriod/mobile
-so if someone wanted to test that and get back to me, that'd be awesome. Currently taking feature requests.
+libGDX-MultiMedia is a lightweight media player library designed to permit playing media files from within a libGDX instance. It is unknown if this will work on Andriod/mobile so if someone wanted to test that and get back to me, that'd be awesome. Currently taking feature requests.
 
 This project was forked from https://github.com/aaronsnoswell/LibGDXVideoSample
 
@@ -98,8 +95,4 @@ this was necessary to prevent choppy playback
 ![Screenshot](screenshot.png "Screenshot")
 
 
-## Controls
-
-Touch / click to play / pause
-Enter to stop video
 
