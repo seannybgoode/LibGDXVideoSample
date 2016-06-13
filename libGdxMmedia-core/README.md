@@ -1,13 +1,14 @@
 # libGDX-MultiMedia version 0.1.6
 
-libGDX-MultiMedia sjbrophy.eastvan@gmail.com
+libGDX-MultiMedia written by Sean Brophy 
+sjbrophy.eastvan@gmail.com
 
 libGDX-MultiMedia is a lightweight media player library designed to permit playing media files from within a libGDX instance. It is unknown if this will work on Andriod/mobile so if someone wanted to test that and get back to me, that'd be awesome. Currently taking feature requests.
 
 This project was forked from https://github.com/aaronsnoswell/LibGDXVideoSample
 
 A tip of the cap to Aaron Snoswell for doing the basic work necessary to make this project possible.
-We've taken this work and done some optimization and added audio support.
+We've taken this work and done some optimization and done the audio implementation.
 
 #0.1.6 changes
 - continue work on syncing issues across hardware
